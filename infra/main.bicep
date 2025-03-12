@@ -1,128 +1,49 @@
-// Execute this main file to depoy Azure AI Foundry resources in the basic security configuraiton
+targetScope = 'subscription'
 
-// Parameters
-@minLength(2)
-@maxLength(12)
-@description('Name for the AI resource and used to derive name of dependent resources.')
-param aiHubName string = 'standard-hub'
+@minLength(1)
+@maxLength(64)
+@description('Name of the environment that can be used as part of naming resource convention')
+param environmentName string
 
-@description('Friendly name for your Azure AI resource')
-param aiHubFriendlyName string = 'Agents standard hub resource'
+@minLength(1)
+@description('Primary location for all resources')
+param location string
 
-@description('Description of your Azure AI resource dispayed in Azure AI Foundry')
-param aiHubDescription string = 'A standard hub resource required for the agent setup.'
+param workshopExists bool
+@secure()
+param workshopDefinition object
 
-@description('Name for the project')
-param aiProjectName string = 'standard-project'
+@description('Id of the user or app to assign application roles')
+param principalId string
 
-@description('Friendly name for your Azure AI resource')
-param aiProjectFriendlyName string = 'Agents standard project resource'
-
-@description('Description of your Azure AI resource dispayed in Azure AI Foundry')
-param aiProjectDescription string = 'A standard project resource required for the agent setup.'
-
-@description('Azure region used for the deployment of all resources.')
-param location string = resourceGroup().location
-
-@description('Set of tags to apply to all resources.')
-param tags object = {}
-
-@description('Model name for deployment')
-param modelName string = 'gpt-4o'
-
-@description('Model format for deployment')
-param modelFormat string = 'OpenAI'
-
-@description('Model version for deployment')
-param modelVersion string = '2024-08-06'
-
-@description('Model deployment SKU name')
-param modelSkuName string = 'GlobalStandard'
-
-@description('Model deployment capacity')
-param modelCapacity int = 140
-
-@description('Model deployment location. If you want to deploy an Azure AI resource/model in different location than the rest of the resources created.')
-param modelLocation string = 'eastus2'
-
-// Variables
-var name = toLower('${aiHubName}')
-var projectName = toLower('${aiProjectName}')
-
-@description('Name of the storage account')
-param storageName string = 'agentservicestorage'
-
-@description('Name of the Azure AI Services account')
-param aiServicesName string = 'agent-ai-services'
-
-// Create a short, unique suffix, that will be unique to each resource group
-// var uniqueSuffix = substring(uniqueString(resourceGroup().id), 0, 4)
-param deploymentTimestamp string = utcNow('yyyyMMddHHmmss')
-var uniqueSuffix = substring(uniqueString('${resourceGroup().id}-${deploymentTimestamp}'), 0, 4)
-
-// Dependent resources for the Azure Machine Learning workspace
-module aiDependencies 'modules-basic-keys/basic-dependent-resources-keys.bicep' = {
-  name: 'dependencies-${name}-${uniqueSuffix}-deployment'
-  params: {
-    aiServicesName: '${aiServicesName}-${uniqueSuffix}'
-    storageName: '${storageName}${uniqueSuffix}'
-    location: location
-    tags: tags
-
-     // Model deployment parameters
-     modelName: modelName
-     modelFormat: modelFormat
-     modelVersion: modelVersion
-     modelSkuName: modelSkuName
-     modelCapacity: modelCapacity
-     modelLocation: modelLocation
-  }
+// Tags that should be applied to all resources.
+// 
+// Note that 'azd-service-name' tags should be applied separately to service host resources.
+// Example usage:
+//   tags: union(tags, { 'azd-service-name': <service name in azure.yaml> })
+var tags = {
+  'azd-env-name': environmentName
 }
 
-module aiHub 'modules-basic-keys/basic-ai-hub-keys.bicep' = {
-  name: 'ai-${name}-${uniqueSuffix}-deployment'
-  params: {
-    // workspace organization
-    aiHubName: 'ai-${name}-${uniqueSuffix}'
-    aiHubFriendlyName: aiHubFriendlyName
-    aiHubDescription: aiHubDescription
-    location: location
-    tags: tags
-
-    // dependent resources
-    modelLocation: modelLocation
-    storageAccountId: aiDependencies.outputs.storageId
-    aiServicesId: aiDependencies.outputs.aiservicesID
-    aiServicesTarget: aiDependencies.outputs.aiservicesTarget
-  }
+// Organize resources in a resource group
+resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
+  name: 'rg-${environmentName}'
+  location: location
+  tags: tags
 }
 
-module aiProject 'modules-basic-keys/basic-ai-project-keys.bicep' = {
-  name: 'ai-${projectName}-${uniqueSuffix}-deployment'
+module resources 'resources.bicep' = {
+  scope: rg
+  name: 'resources'
   params: {
-    // workspace organization
-    aiProjectName: 'ai-${projectName}-${uniqueSuffix}'
-    aiProjectFriendlyName: aiProjectFriendlyName
-    aiProjectDescription: aiProjectDescription
     location: location
     tags: tags
-
-    // dependent resources
-    aiHubId: aiHub.outputs.aiHubID
+    principalId: principalId
+    workshopExists: workshopExists
+    workshopDefinition: workshopDefinition
   }
 }
-
-// module bingSearchGrounding 'bing-grounding.bicep' = {
-//   name: 'bing-search-grounding'
-//   params: {
-//     name: 'bing-grounding-${uniqueSuffix}'
-//     location: location
-//     bingAccountName: 'ai-${aiServicesName}-bing-grounding'
-//   }
-// }
-
-
-output subscriptionId string = subscription().subscriptionId
-output resourceGroupName string = resourceGroup().name
-output aiProjectName string = 'ai-${projectName}-${uniqueSuffix}'
-// output bingGroundingName string = 'bing-grounding-${uniqueSuffix}'
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = resources.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT
+output AZURE_KEY_VAULT_ENDPOINT string = resources.outputs.AZURE_KEY_VAULT_ENDPOINT
+output AZURE_KEY_VAULT_NAME string = resources.outputs.AZURE_KEY_VAULT_NAME
+output AZURE_RESOURCE_WORKSHOP_ID string = resources.outputs.AZURE_RESOURCE_WORKSHOP_ID
