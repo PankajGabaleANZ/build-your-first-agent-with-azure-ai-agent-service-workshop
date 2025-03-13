@@ -50,8 +50,10 @@ functions = AsyncFunctionTool(
     }
 )
 
-INSTRUCTIONS_FILE = "instructions/instructions_bing_grounding.txt"
+import glob
+vector_files = glob.glob("/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/files/*") 
 TENTS_DATA_SHEET_FILE = "files/Contoso_Product_Information.csv"
+INSTRUCTIONS_FILE = "instructions/instructions_file_search.txt"
 
 async def add_agent_tools():
     """Add tools for the agent."""
@@ -64,7 +66,7 @@ async def add_agent_tools():
         #dd the tents data sheet to a new vector data store
         vector_store = await utilities.create_vector_store(
             project_client,
-            files=["instructions/instructions_bing_grounding.txt"],
+            files=vector_files,
             vector_name_name="Contoso Product Information Vector Store",
         )
         file_search_tool = FileSearchTool(vector_store_ids=[vector_store.id])
@@ -116,20 +118,6 @@ async def initialize() -> tuple[Agent, AgentThread]:
         logger.error("An error occurred initializing the agent: %s", str(e))
         logger.error("Please ensure you've enabled an instructions file.")
         return None, None
-    
-async def search_vector_store(query: str, vector_store):
-    """Search the Azure OpenAI vector store for relevant information."""
-    utilities.log_msg_purple(f"Searching vector store for query: {query}")
-
-    response = await project_client.agents.vector_search(
-        vector_store_id=vector_store.id, query=query, top_k=3
-    )
-
-    if response.matches:
-        matched_content = "\n".join([match.content for match in response.matches])
-        return f"Here’s what I found:\n\n{matched_content}"
-    
-    return None
 
 async def cleanup(agent: Agent, thread: AgentThread) -> None:
     """Cleanup the resources."""
@@ -204,23 +192,27 @@ async def post_message(thread_id: str, content: str, agent: Agent, thread: Agent
         await cl.Message(content=f"Error occurred: {e}").send()
         await cleanup(agent, thread)
 
-
 @cl.on_chat_start
 async def main():
     """Chainlit main function."""
-    if cl.user_session.get("agent") is None:
-        agent, thread = await initialize()
-        if agent is None or thread is None:
-            await cl.Message(content="Initialization failed, exiting program.").send()
-            return
-        cl.user_session.set("agent", agent)
-        cl.user_session.set("thread", thread)
-        await cl.Message(content="Agent initialized. You can now ask questions.").send()
-    else:
-        await cl.Message(content="Existing Agent Found. You can now ask questions.").send()
+    agent, thread = await initialize()
+    if agent is None or thread is None:
+        await cl.Message(content="Initialization failed, exiting program.").send()
+        return
+    await cl.Message(content="Agent initialized. You can now ask questions.").send()
 
 from pathlib import Path
 import shutil
+def debug_file_paths(files: list[str]):
+    """Debug function to check file paths."""
+    for file in files:
+        path = Path(file)
+        print(f"File path: {path}")
+        print(f"  Exists: {path.exists()}")
+        print(f"  Is file: {path.is_file()}")
+        print(f"  Absolute: {path.absolute()}")
+        print(f"  Size: {path.stat().st_size if path.exists() else 'N/A'}")
+    return len([f for f in files if Path(f).exists()])
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -233,39 +225,42 @@ async def on_message(message: cl.Message):
         return
 
     uploaded_files = []
-
-    # 🔍 Check if message has file attachments
+    save_dir = Path("files")  # Simplified path without environment-specific prefixes
+    
+    # Handle file uploads
     if message.elements:
-        save_dir = Path("files")  # Define local save directory
-        save_dir.mkdir(parents=True, exist_ok=True)  # Create if not exists
-
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
         for element in message.elements:
             if element.type == "file":
-                file_path = save_dir / Path(element.path).name  # Save file in local folder
-                shutil.copy(element.path, file_path)  # Copy file from Chainlit temp to local
-                uploaded_files.append(str(file_path))  # Collect saved file path
-
-                print(f"📂 File saved: {file_path}")
-
-        # ✅ Upload saved files to the vector store
-        vector_store = await utilities.create_vector_store(
-            project_client, uploaded_files, "UserUploadedVectorStore"
-        )
-
-        # Save vector store ID for future searches
-        cl.user_session.set("vector_store", vector_store)
-
-        await cl.Message(content=f"📁 {len(uploaded_files)} files uploaded and indexed.").send()
-
-    # 🔍 Search vector store before calling agent
-    vector_store = cl.user_session.get("vector_store")
-    if vector_store:
-        answer = await search_vector_store(message.content, vector_store)
-        if answer:
-            await cl.Message(content=answer).send()
-            return  # Avoid unnecessary AI processing if we have an answer
-
-    # 🚀 Forward the message to AI agent if no answer was found in vector DB
+                file_path = save_dir / element.name
+                
+                try:
+                    shutil.copyfile(element.path, file_path)
+                    uploaded_files.append(str(file_path))
+                    print(f"📂 File saved: {file_path}")
+                except Exception as e:
+                    print(f"Error saving file: {e}")
+                    await cl.Message(content=f"⚠️ Error saving file: {element.name}").send()
+                    continue
+        
+        # Debug file paths
+        valid_files = debug_file_paths(uploaded_files)
+        print(f"Valid files: {valid_files}/{len(uploaded_files)}")
+        
+        if valid_files > 0:
+            # Create vector store with uploaded files
+            vector_store = await utilities.create_vector_store(
+                project_client, uploaded_files, f"UserUploadedVectorStore_{thread.id}"
+            )
+            
+            if vector_store:
+                cl.user_session.set("vector_store", vector_store)
+                await cl.Message(content=f"📁 {valid_files} files uploaded and indexed successfully.").send()
+            else:
+                await cl.Message(content="⚠️ Failed to create vector store with uploaded files.").send()
+    
+    # Forward the message to AI agent
     await post_message(
         agent=agent,
         thread_id=thread.id,
