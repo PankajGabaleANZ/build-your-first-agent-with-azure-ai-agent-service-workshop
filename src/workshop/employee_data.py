@@ -5,6 +5,8 @@ from typing import Optional
 import aiosqlite
 import pandas as pd
 from terminal_colors import TerminalColors as tc
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 DATA_BASE = "/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/src/workshop/database/employee-data.db"
 
@@ -121,3 +123,4 @@ class EmployeeData:
 
         except Exception as e:
             return json.dumps({"error": str(e)})
+    

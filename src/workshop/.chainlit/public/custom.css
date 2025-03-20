@@ -1,0 +1,47 @@
+:root {
+    --primary-color: #FFE600; /* EY Yellow */
+    --secondary-color: #2E2E38; /* EY Dark Gray/Slate */
+  }
+  
+  /* Brand colors */
+  .cl-brand {
+    color: var(--primary-color) !important;
+  }
+  
+  /* Headers */
+  h1, h2, h3 {
+    color: var(--primary-color) !important;
+  }
+  
+  /* Button styling */
+  .cl-button {
+    background-color: var(--primary-color) !important;
+    color: black !important;
+  }
+  
+  /* Message box styling */
+  .cl-chat-input {
+    border-color: var(--primary-color) !important;
+  }
+  
+  /* Styling for AI messages */
+  .cl-message-ai {
+    background-color: var(--secondary-color) !important;
+    border-left: 4px solid var(--primary-color) !important;
+  }
+  
+  /* Watermark - subtle EY tagline at bottom */
+  .cl-footer::after {
+    content: "Building a better working world";
+    display: block;
+    text-align: center;
+    color: rgba(255, 230, 0, 0.6);
+    font-size: 0.8rem;
+    margin-top: 1rem;
+    font-style: italic;
+  }
+  
+  /* Markdown link styling in chat */
+  .markdown-body a {
+    color: var(--primary-color) !important;
+  }

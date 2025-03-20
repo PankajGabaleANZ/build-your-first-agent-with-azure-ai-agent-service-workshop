@@ -19,6 +19,8 @@ class Utilities:
     def log_token_blue(self, msg: str) -> None:
         """Print a token in blue."""
         print(f"{tc.BLUE}{msg}{tc.RESET}", end="", flush=True)
+
+    
         
     async def get_file(self, project_client: AIProjectClient, file_id: str, attachment_name: str) -> str | None:
         """Retrieve the file, save it locally, and return its path."""
@@ -196,7 +198,7 @@ class Utilities:
         file_name = f"{file_name}.{file_id}{file_extension}"
 
         env = os.getenv("ENVIRONMENT", "local")
-        folder_path = Path(f"{'src/workshop/' if env == 'container' else ''}files/file")
+        folder_path = Path(f"/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/files/*")
         folder_path.mkdir(parents=True, exist_ok=True)
 
         file_path = folder_path / file_name
@@ -204,19 +206,19 @@ class Utilities:
         try:
             file_content_stream = await project_client.agents.get_file_content(file_id)
             
-            with file_path.open("wb") as file:
-                async for chunk in file_content_stream:
-                    if isinstance(chunk, bytes):
-                        file.write(chunk)
-                    else:
-                        print(f"❌ Unexpected data type in file stream: {type(chunk)}")
+            # with file_path.open("wb") as file:
+            #     async for chunk in file_content_stream:
+            #         if isinstance(chunk, bytes):
+            #             file.write(chunk)
+            #         else:
+            #             print(f"❌ Unexpected data type in file stream: {type(chunk)}")
             
-            self.log_msg_green(f"✅ File saved to {file_path}")
+            # self.log_msg_green(f"✅ File saved to {file_path}")
 
-            # Cleanup the remote file
-            await project_client.agents.delete_file(file_id)
+            # # Cleanup the remote file
+            # await project_client.agents.delete_file(file_id)
 
-            return str(file_path)  # Return the saved file path
+            return str(file_content_stream)  # Return the saved file path
 
         except Exception as e:
             print(f"❌ Error saving file {file_name}: {e}")
@@ -239,9 +241,50 @@ class Utilities:
                     
                     # Step 2: Download the file using the file ID
                     await self.get_file(project_client, file_id, attachment_name)
-                    
+        
+        
         print("File retrieval completed")
-
+    async def get_files_with_memory(self, message: ThreadMessage, project_client: AIProjectClient, memory_store: dict = None) -> dict:
+        """
+        Get the files from the message, download them, and store their contents in memory.
+        
+        Args:
+            message: The message containing file attachments
+            project_client: The AIProjectClient instance
+            memory_store: Optional existing memory store to update. If None, a new one will be created.
+            
+        Returns:
+            Dictionary mapping file paths to their contents
+        """
+        if memory_store is None:
+            memory_store = {}
+        
+        print("Getting files and storing contents in memory")
+        downloaded_files = []
+        
+        # Step 1: Check for the attachments containing file IDs
+        if message.attachments:
+            for attachment in message.attachments:
+                file_id = attachment.get('file_id')  # Get the file ID from the attachment
+                
+                if file_id:
+                    # Extract file name or use "unknown" if not available
+                    attachment_name = (
+                        "unknown" if not message.file_path_annotations else message.file_path_annotations[0].text
+                    )
+                    
+                    # Step 2: Download the file using the file ID
+                    file_path = await self.get_file(project_client, file_id, attachment_name)
+                    if file_path:
+                        downloaded_files.append(file_path)
+        
+        # Step 3: Store the contents of the downloaded files in memory
+        if downloaded_files:
+            memory_store = await self.store_file_contents(downloaded_files, memory_store)
+        
+        print("File retrieval and memory storage completed")
+        return memory_store
+    
     async def create_vector_store(self, project_client: AIProjectClient, files: list[str], vector_name_name: str):
         """Upload files to the project and create a vector store."""
         file_ids = []
@@ -290,7 +333,7 @@ class Utilities:
             return None
         
     async def update_vector_store(self, project_client: AIProjectClient, vector_store_id: str, files: list[str]):
-            """Update the existing vector store with when new files are added."""
+            """Update the existing vector store with when new files are recieved from user."""
             try:
                 file_ids = []
                 self.log_msg_purple(f"Updating vector store with ID: {vector_store_id} with files: {files}")
@@ -330,7 +373,8 @@ class Utilities:
             except Exception as e:
                 self.log_msg_purple(f"❌ Failed to update vector store: {e}")
                 raise
-            
+
+    
     async def search_vector_store(self, project_client: AIProjectClient, vector_store_id: str, query: str):
         """Search the vector store for relevant information."""
         self.log_msg_purple(f"Searching vector store with ID: {vector_store_id} for query: {query}")
@@ -352,3 +396,5 @@ class Utilities:
         except Exception as e:
             self.log_msg_purple(f"Error searching vector store: {e}")
             return None
+        
+    

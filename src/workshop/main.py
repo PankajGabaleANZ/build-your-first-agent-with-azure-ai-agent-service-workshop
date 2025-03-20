@@ -43,17 +43,65 @@ project_client = AIProjectClient.from_connection_string(
     conn_str=PROJECT_CONNECTION_STRING,
 )
 
+import glob
+vector_files = glob.glob("/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/files/*") 
+
+INSTRUCTIONS_FILE = "instructions/instructions_file_search.txt"
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def send_email(subject, body):
+    """
+    This function is used to send an email to the users if they have added an expense. Send the expense checking the expense and send the email to user if the expense is compliant or not.
+
+    """
+    try:
+        print("Sending email...to the user")
+        # # Usage Example:
+        sender_email = "gabalepankaj@gmail.com"
+        receiver_email = "gabalepankaj@hotmail.com"
+        subject = subject
+        body = body
+        smtp_server = "smtp.gmail.com"  # For Gmail
+        smtp_port = 587  # SMTP port for Gmail
+        sender_password = "wqil wwlp laxm ndud"  # Make sure to use an App Password if using Gmail
+
+        # send_email(sender_email, receiver_email, subject, body, smtp_server, smtp_port, sender_password)
+        # Create the email
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Set up the server
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Secure the connection
+        
+        # Login to the server
+        server.login(sender_email, sender_password)
+        
+        # Send the email
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+        
+        # Quit the server connection
+        server.quit()
+        
+        print("Email sent successfully!")
+        return body
+    except Exception as e:
+        print("Email Sent Failed")
+        print(f"Error: {e}")
+        
+
 functions = AsyncFunctionTool(
     {
         sales_data.async_fetch_sales_data_using_sqlite_query,
         employee_data.async_fetch_employee_data_using_sqlite_query,
+        send_email,
     }
 )
-
-import glob
-vector_files = glob.glob("/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/files/*") 
-TENTS_DATA_SHEET_FILE = "files/Contoso_Product_Information.csv"
-INSTRUCTIONS_FILE = "instructions/instructions_file_search.txt"
 
 async def add_agent_tools():
     """Add tools for the agent."""
@@ -65,7 +113,7 @@ async def add_agent_tools():
 
         #dd the tents data sheet to a new vector data store
         vector_store = await utilities.create_vector_store(
-            project_client,
+            project_client, 
             files=vector_files,
             vector_name_name="Contoso Product Information Vector Store",
         )
@@ -79,14 +127,15 @@ async def add_agent_tools():
 
 async def initialize() -> tuple[Agent, AgentThread]:
     """Initialize the agent with the sales data schema and instructions."""
-
     await add_agent_tools()
-
     await sales_data.connect()
     await employee_data.connect()
+    
+    # Get database schema information
     sales_schema_string = await sales_data.get_database_info()
     employee_schema_string = await employee_data.get_database_info()
     database_schema_string = f"{sales_schema_string}\n\n{employee_schema_string}"
+    
     try:
         env = os.getenv("ENVIRONMENT", "local")
         INSTRUCTIONS_FILE_PATH = f"{'src/workshop/' if env == 'container' else ''}{INSTRUCTIONS_FILE}"
@@ -97,17 +146,32 @@ async def initialize() -> tuple[Agent, AgentThread]:
         instructions = instructions.replace("{database_schema_string}", sales_schema_string)
         instructions = instructions.replace("{employee_schema_string}", employee_schema_string)
 
-        print("Creating agent...")
-        agent = await project_client.agents.create_agent(
-            model=API_DEPLOYMENT_NAME,
-            name=AGENT_NAME,
-            instructions=instructions,
-            toolset=toolset,
-            temperature=TEMPERATURE,
-            headers={"x-ms-enable-preview": "true"},
-        )
-        print(f"Created agent, ID: {agent.id}")
-
+        # Try to get existing agent first
+        try:
+            existing_agents = await project_client.agents.list_agents()
+            agent = next((a for a in existing_agents if a.name == AGENT_NAME), None)
+        except Exception:
+            agent = None
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        agent_name_with_timestamp = f"{AGENT_NAME}_{timestamp}"
+        # Create new agent if not found
+        if not agent:
+            print("Creating agent...")
+            agent = await project_client.agents.create_agent(
+                model=API_DEPLOYMENT_NAME,
+                name=agent_name_with_timestamp,
+                instructions=instructions,
+                toolset=toolset,
+                temperature=TEMPERATURE,
+                headers={"x-ms-enable-preview": "true"},
+            )
+            print(f"Created agent, ID: {agent.id}")
+        else:
+            print(f"Using existing agent, ID: {agent.id}")
+        #Sleep for 10 seconds to allow the agent to be created
+        import time
+        time.sleep(10)
         print("Creating thread...")
         thread = await project_client.agents.create_thread()
         print(f"Created thread, ID: {thread.id}")
@@ -139,6 +203,8 @@ async def post_message(thread_id: str, content: str, agent: Agent, thread: Agent
                 "file_id": file_path,  # Assuming file_id is the saved path
                 "file_name": os.path.basename(file_path),
             })
+        if not attachments:
+            print("user has not attached any files")
 
         await project_client.agents.create_message(
             thread_id=thread_id,
@@ -195,11 +261,19 @@ async def post_message(thread_id: str, content: str, agent: Agent, thread: Agent
 @cl.on_chat_start
 async def main():
     """Chainlit main function."""
-    agent, thread = await initialize()
-    if agent is None or thread is None:
-        await cl.Message(content="Initialization failed, exiting program.").send()
-        return
-    await cl.Message(content="Agent initialized. You can now ask questions.").send()
+    try:
+        agent, thread = await initialize()
+        if agent is None or thread is None:
+            await cl.Message(content="Initialization failed, exiting program.").send()
+            return
+        
+        # Store agent and thread in the user session
+        cl.user_session.set("agent", agent)
+        cl.user_session.set("thread", thread)
+        
+        await cl.Message(content="Agent initialized. You can now ask questions.").send()
+    except Exception as e:
+        await cl.Message(content=f"Error during initialization: {e}").send()
 
 from pathlib import Path
 import shutil
@@ -214,60 +288,63 @@ def debug_file_paths(files: list[str]):
         print(f"  Size: {path.stat().st_size if path.exists() else 'N/A'}")
     return len([f for f in files if Path(f).exists()])
 
+from pathlib import Path
+import shutil
+
 @cl.on_message
 async def on_message(message: cl.Message):
     """Handle messages and file uploads in Chainlit."""
     agent = cl.user_session.get("agent")
     thread = cl.user_session.get("thread")
 
+    print(f"Agent in session: {agent.id if agent else None}")
+    print(f"Thread in session: {thread.id if thread else None}")
+
     if not agent or not thread:
-        await cl.Message(content="Agent or thread not initialized.").send()
+        await cl.Message(content="Agent or thread not initialized. Please refresh the page to start a new chat.").send()
         return
 
     uploaded_files = []
-    save_dir = Path("files")  # Simplified path without environment-specific prefixes
-    
+    save_dir = Path("files")  
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    file_contents = []  # Store file contents to append to the message
+
     # Handle file uploads
     if message.elements:
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
         for element in message.elements:
             if element.type == "file":
                 file_path = save_dir / element.name
-                
+
                 try:
                     shutil.copyfile(element.path, file_path)
                     uploaded_files.append(str(file_path))
+
+                    # Read file contents
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
+                        file_text = file.read()
+                        file_contents.append(f"**File: {element.name}**\n{file_text}")
+
                     print(f"📂 File saved: {file_path}")
                 except Exception as e:
                     print(f"Error saving file: {e}")
                     await cl.Message(content=f"⚠️ Error saving file: {element.name}").send()
                     continue
-        
-        # Debug file paths
-        valid_files = debug_file_paths(uploaded_files)
-        print(f"Valid files: {valid_files}/{len(uploaded_files)}")
-        
-        if valid_files > 0:
-            # Create vector store with uploaded files
-            vector_store = await utilities.create_vector_store(
-                project_client, uploaded_files, f"UserUploadedVectorStore_{thread.id}"
-            )
-            
-            if vector_store:
-                cl.user_session.set("vector_store", vector_store)
-                await cl.Message(content=f"📁 {valid_files} files uploaded and indexed successfully.").send()
-            else:
-                await cl.Message(content="⚠️ Failed to create vector store with uploaded files.").send()
-    
+
+    # Combine user message with file contents
+    combined_content = message.content
+    if file_contents:
+        combined_content += "\n\n" + "\n\n".join(file_contents)
+
     # Forward the message to AI agent
     await post_message(
         agent=agent,
         thread_id=thread.id,
-        content=message.content,
+        content=combined_content,  # Pass combined user message + file content
         thread=thread,
         uploaded_files=uploaded_files,
     )
+
 
 @cl.on_chat_end
 async def on_chat_end():
