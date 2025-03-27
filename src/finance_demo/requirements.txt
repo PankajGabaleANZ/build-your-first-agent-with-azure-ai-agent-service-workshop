@@ -1,0 +1,13 @@
+azure-identity
+azure-ai-projects
+chainlit
+python-dotenv
+fitz
+PyMuPDF
+smtplib
+autogen-agentchat
+autogen-ext[azure, openai]
+python-dotenv
+azure-identity
+azure-ai-projects
+tiktoken

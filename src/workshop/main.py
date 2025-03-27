@@ -43,6 +43,7 @@ project_client = AIProjectClient.from_connection_string(
     conn_str=PROJECT_CONNECTION_STRING,
 )
 
+
 import glob
 vector_files = glob.glob("/workspaces/build-your-first-agent-with-azure-ai-agent-service-workshop/files/*") 
 
